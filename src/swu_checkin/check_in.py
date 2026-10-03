@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from getpass import getpass
 import json
 import os
@@ -36,7 +36,17 @@ def _env_int(name: str, default: int) -> int:
 
 
 def _check_vacation_enabled(token: str, timeout: int) -> bool:
-    """检查是否在请假期间"""
+    """检查当前是否处于已批准的请假期间。
+
+    两点注意（都曾导致漏判，进而误打卡 → 自动销假）：
+
+    1. GitHub Actions runner 的进程时区是 UTC，而 listSelfLeaveData 返回的
+       kssj/jssj 是北京时间。若直接用 datetime.now() 与北京时间比较，会相差
+       8 小时，使请假第一天的检测失效（例如请假当天 18:00 起，打卡在 21:07
+       触发时会被判定为"未请假"）。这里统一换算到北京时间再比。
+    2. 接口返回多条申请时，生效的那条未必排在 records[0]（最新一条可能是
+       未审批/已驳回的）。因此遍历所有记录，取"当前正处于已同意假期内"的那条。
+    """
     headers = {"fighter-auth-token": token}
     url = "https://of.swu.edu.cn/gateway/fighter-baida/api/xsqjxj/listSelfLeaveData?pageNum=1&pageSize=10"
     
@@ -48,15 +58,20 @@ def _check_vacation_enabled(token: str, timeout: int) -> bool:
         if not records:
             return False
         
-        latest = records[0]
-        if latest.get("lcztmc") != "已同意":
-            return False
-        
-        now = datetime.now()
-        start = datetime.strptime(latest["kssj"], "%Y-%m-%d %H:%M")
-        end = datetime.strptime(latest["jssj"], "%Y-%m-%d %H:%M")
-        
-        return start <= now <= end
+        now = datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)
+
+        for record in records:
+            if record.get("lcztmc") != "已同意":
+                continue
+            try:
+                start = datetime.strptime(record["kssj"], "%Y-%m-%d %H:%M")
+                end = datetime.strptime(record["jssj"], "%Y-%m-%d %H:%M")
+            except (KeyError, ValueError):
+                continue
+            if start <= now <= end:
+                return True
+
+        return False
     except (requests.exceptions.RequestException, KeyError, ValueError):
         return False
 
