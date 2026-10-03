@@ -4,20 +4,17 @@ name: 自动签到
 # GitHub 官方禁用 workflow 后，定时任务和手动触发都会停止
 
 on:
-  schedule:
-    # 北京时间 21:07 ~ 23:19（UTC 13:07 ~ 15:19），错峰分钟（避开 :00/:15/:30/:45 高峰）
-    # GitHub 定时任务是"尽力而为"，高峰期会延迟几小时甚至直接丢弃（官方文档明示）
-    # 所以在打卡窗口内布多个"错峰闹钟"；打卡幂等（打过了自动跳过），多跑无害
-    - cron: '7 13 * * *'    # 北京 21:07
-    - cron: '23 13 * * *'   # 北京 21:23
-    - cron: '41 13 * * *'   # 北京 21:41
-    - cron: '57 13 * * *'   # 北京 21:57
-    - cron: '13 14 * * *'   # 北京 22:13
-    - cron: '29 14 * * *'   # 北京 22:29
-    - cron: '47 14 * * *'   # 北京 22:47
-    - cron: '3 15 * * *'    # 北京 23:03
-    - cron: '19 15 * * *'   # 北京 23:19
-  workflow_dispatch:  # 允许手动触发
+  # ⚠️ 这里曾经有 9 个 schedule cron，已于 2026-10-04 全部移除，原因见下。
+  #
+  # GitHub 的 schedule 是"尽力而为"：实测 2026-10-04 凌晨，本应 21:07~23:19
+  # （北京）触发的排程，实际在 01:40~02:41 才陆续执行，**延迟 2.5~3.5 小时**。
+  # 完全落不进 21:00~23:30 的打卡窗口，执行时当日任务还不存在，脚本一律返回
+  # [0] 今日无签到记录 —— 既打不了卡，又会在凌晨连发多条告警把推送额度耗光。
+  #
+  # 定时调度已全部交给 Cloudflare Worker（checkin.mydingding.us.ci），
+  # 它的 cron 按点执行（实测 21:07 准点），再通过 API 触发这里的
+  # workflow_dispatch。所以本文件只保留手动触发入口。
+  workflow_dispatch:  # 允许手动触发（Worker 走 API 调用它）
     inputs:
       notify:
         description: '推送策略：auto=仅成功/异常时推；always=每次都推（测试通道用）'
@@ -324,6 +321,20 @@ jobs:
           if [ -z "$SERVERCHAN_KEY" ] && [ -z "$PUSHPLUS_TOKEN" ]; then
             echo "⚠️ 未配置 SERVERCHAN_KEY 或 PUSHPLUS_TOKEN，跳过微信推送"
             exit 0
+          fi
+
+          # 时间守卫：只在打卡窗口内（北京 20:55~23:35）推送。
+          # 起因：2026-10-04 事故——GitHub 的 schedule 延迟到凌晨 01:40~02:41
+          # 执行，当时当日任务尚未生成，每次返回 [0] 都触发一条推送，
+          # 6 条就耗尽了 Server酱 每天 5 条的免费额度。
+          # 这里按北京时间硬拦：无论触发源是谁、几点跑的，落不到窗口内就不推。
+          # 手动触发时传 notify=always 可绕过（用于测试推送通道）。
+          if [ "${{ inputs.notify }}" != "always" ]; then
+            hm=$((10#$(TZ='Asia/Shanghai' date '+%H%M')))
+            if [ "$hm" -lt 2055 ] || [ "$hm" -gt 2335 ]; then
+              echo "当前北京时间 $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M')，不在打卡窗口（21:00~23:30）内，跳过推送"
+              exit 0
+            fi
           fi
 
           if [ "$STATUS_CODE" = "1" ]; then icon="✅"; else icon="⚠️"; fi
