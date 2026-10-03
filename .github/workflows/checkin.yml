@@ -292,6 +292,65 @@ jobs:
             echo "✅ 异常通知邮件已发送"
           fi
 
+      # ===== 微信推送通知（比邮件更即时，建议配这个）=====
+      # 二选一，配了哪个用哪个；两个都配则都推。都不配则自动跳过。
+      #   SERVERCHAN_KEY  Server酱 SendKey   https://sct.ftqq.com
+      #   PUSHPLUS_TOKEN  PushPlus token     https://www.pushplus.plus
+      - name: 发送微信推送
+        id: wechat_push
+        if: always() && steps.checkin.outputs.status_code != '1' && steps.checkin.outputs.status_code != '2'
+        continue-on-error: true
+        env:
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+          STATUS_CODE: ${{ steps.checkin.outputs.status_code }}
+          STATUS_MSG: ${{ steps.checkin.outputs.status_msg }}
+          FULL_RESULT: ${{ steps.checkin.outputs.full_result }}
+          BJ_TIME: ${{ steps.format_time.outputs.beijing_time }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -z "$SERVERCHAN_KEY" ] && [ -z "$PUSHPLUS_TOKEN" ]; then
+            echo "⚠️ 未配置 SERVERCHAN_KEY 或 PUSHPLUS_TOKEN，跳过微信推送"
+            exit 0
+          fi
+
+          title="⚠️ SWU 查寝打卡异常 [${STATUS_CODE}] ${STATUS_MSG}"
+          body=$(printf '账号：%s\n状态码：%s\n状态信息：%s\n执行时间：%s（北京时间）\n完整结果：%s\n\n查看日志：%s\n' \
+            "${{ matrix.account.name }}" "$STATUS_CODE" "$STATUS_MSG" "$BJ_TIME" "$FULL_RESULT" "$RUN_URL")
+
+          sent=0
+
+          if [ -n "$SERVERCHAN_KEY" ]; then
+            echo "→ Server酱 推送中…"
+            if resp=$(curl -sS --max-time 20 -X POST "https://sctapi.ftqq.com/${SERVERCHAN_KEY}.send" \
+                 --data-urlencode "title=${title}" --data-urlencode "desp=${body}" 2>&1); then
+              echo "   $resp"
+              sent=1
+            else
+              echo "   ❌ 请求失败: $resp"
+            fi
+          fi
+
+          if [ -n "$PUSHPLUS_TOKEN" ]; then
+            echo "→ PushPlus 推送中…"
+            if resp=$(curl -sS --max-time 20 -X POST "https://www.pushplus.plus/send" \
+                 --data-urlencode "token=${PUSHPLUS_TOKEN}" \
+                 --data-urlencode "title=${title}" \
+                 --data-urlencode "content=${body}" \
+                 --data-urlencode "template=txt" 2>&1); then
+              echo "   $resp"
+              sent=1
+            else
+              echo "   ❌ 请求失败: $resp"
+            fi
+          fi
+
+          if [ "$sent" = "1" ]; then
+            echo "✅ 微信推送已发送"
+          else
+            echo "⚠️ 微信推送发送失败，请检查 SendKey / token 是否正确"
+          fi
+
       - name: 最终状态检查
         if: always()
         run: |
