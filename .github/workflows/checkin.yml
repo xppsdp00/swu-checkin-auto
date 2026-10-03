@@ -18,6 +18,14 @@ on:
     - cron: '3 15 * * *'    # 北京 23:03
     - cron: '19 15 * * *'   # 北京 23:19
   workflow_dispatch:  # 允许手动触发
+    inputs:
+      notify:
+        description: '推送策略：auto=仅成功/异常时推；always=每次都推（测试通道用）'
+        type: choice
+        options:
+          - auto
+          - always
+        default: auto
 
 jobs:
   checkin:
@@ -298,7 +306,11 @@ jobs:
       #   PUSHPLUS_TOKEN  PushPlus token     https://www.pushplus.plus
       - name: 发送微信推送
         id: wechat_push
-        if: always() && steps.checkin.outputs.status_code != '1' && steps.checkin.outputs.status_code != '2'
+        # 默认策略：成功(1) 与异常(0/3/4) 都推，跳过「已签到」(2) 与「请假」(5)。
+        # 因为打卡幂等，[1] 一天只出现一次（真正打上的那次），而后续冗余触发
+        # 都返回 [2]；过滤掉就不会被刷屏。
+        # 手动触发时可选 notify=always 绕过过滤，用于测试推送通道。
+        if: always() && (inputs.notify == 'always' || (steps.checkin.outputs.status_code != '2' && steps.checkin.outputs.status_code != '5'))
         continue-on-error: true
         env:
           SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
@@ -314,7 +326,8 @@ jobs:
             exit 0
           fi
 
-          title="⚠️ SWU 查寝打卡异常 [${STATUS_CODE}] ${STATUS_MSG}"
+          if [ "$STATUS_CODE" = "1" ]; then icon="✅"; else icon="⚠️"; fi
+          title="${icon} SWU 查寝打卡 [${STATUS_CODE}] ${STATUS_MSG}"
           body=$(printf '账号：%s\n状态码：%s\n状态信息：%s\n执行时间：%s（北京时间）\n完整结果：%s\n\n查看日志：%s\n' \
             "${{ matrix.account.name }}" "$STATUS_CODE" "$STATUS_MSG" "$BJ_TIME" "$FULL_RESULT" "$RUN_URL")
 
