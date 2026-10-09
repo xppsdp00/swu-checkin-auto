@@ -126,6 +126,8 @@ swu-checkin
 - ⚠️ 建议在正式使用前先手动测试一次
 - ⚠️ 网络异常、验证码识别失败、今日任务暂未生成时会自动重试 3 次，打满才算失败
 - ⚠️ 可用环境变量 `SWUDK_MAX_ATTEMPTS`、`SWUDK_RETRY_DELAY` 调整重试次数和等待秒数
+- ⚠️ 可用环境变量 `SWUDK_TIMEOUT` 调整单次请求超时秒数（默认 30）。GitHub Actions
+  runner 到校园网的链路明显慢于本机，超时设太小会让打卡时通时不通
 - ⚠️ GitHub Actions 使用 Secrets 存储敏感信息，安全可靠
 
 ## 相关项目
