@@ -324,8 +324,11 @@ def main() -> int:
     message = STATUS_MESSAGES.get(result, "未知状态")
     # 失败时把真实原因并进最后一行，微信推送正文即可看到，不必翻 Actions 日志。
     # 换行必须压平：这一行会被 workflow 原样写进 $GITHUB_OUTPUT，带换行会解析错。
+    # 方括号也要换掉：workflow 用 grep -oP '\[\K[0-9]+(?=\])' 从这一行抠状态码，
+    # 原因里若出现 [500] 之类会抠出第二个数，把状态码解析乱。
     if result not in {1, 2} and _LAST_FAILURE:
         detail = " ".join(_LAST_FAILURE.split())[:160]
+        detail = detail.replace("[", "(").replace("]", ")")
         message = f"{message}（{detail}）"
     print(f"[{result}] {message}")
     return 0 if result in {1, 2} else 1
