@@ -1,0 +1,25 @@
+name: 诊断探针
+
+# 只读诊断：在 runner 上复现打卡各步骤，打印真实返回。
+# 不提交签到。只在手动触发时运行。
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+      - name: 安装依赖
+        run: |
+          pip install --upgrade pip
+          pip install -e .
+      - name: 运行探针
+        env:
+          SWUDK_USERNAME: ${{ secrets.SWU_USERNAME }}
+          SWUDK_PASSWORD: ${{ secrets.SWU_PASSWORD }}
+        run: python tools/probe.py
